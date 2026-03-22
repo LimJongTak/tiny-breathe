@@ -224,6 +224,179 @@ abstract final class FirestoreService {
     return {'coins': 200, 'seeds': 1};
   }
 
+  // ── Friend requests (bidirectional) ──────────────────────────────────────
+
+  static Future<void> sendFriendRequest({
+    required String fromUid,
+    required String toUid,
+    required String fromNickname,
+    required String fromDisplayName,
+    String? fromPhotoUrl,
+  }) async {
+    final docId = '${fromUid}_$toUid';
+    await _db.collection('friendRequests').doc(docId).set({
+      'fromUid': fromUid,
+      'toUid': toUid,
+      'fromNickname': fromNickname,
+      'fromDisplayName': fromDisplayName,
+      'fromPhotoUrl': fromPhotoUrl,
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Future<List<Map<String, dynamic>>> getPendingIncomingRequests(
+      String uid) async {
+    final snap = await _db
+        .collection('friendRequests')
+        .where('toUid', isEqualTo: uid)
+        .get();
+    return snap.docs
+        .where((d) => d.data()['status'] == 'pending')
+        .map((d) => {'id': d.id, ...d.data()})
+        .toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> getSentPendingRequests(
+      String uid) async {
+    final snap = await _db
+        .collection('friendRequests')
+        .where('fromUid', isEqualTo: uid)
+        .get();
+    return snap.docs
+        .where((d) => d.data()['status'] == 'pending')
+        .map((d) => {'id': d.id, ...d.data()})
+        .toList();
+  }
+
+  static Future<void> acceptFriendRequest({
+    required String requestId,
+    required String myUid,
+    required String friendUid,
+  }) async {
+    final batch = _db.batch();
+    batch.update(_db.collection('friendRequests').doc(requestId), {
+      'status': 'accepted',
+    });
+    batch.set(
+      _db.collection('users').doc(myUid),
+      {'friendIds': FieldValue.arrayUnion([friendUid])},
+      SetOptions(merge: true),
+    );
+    batch.set(
+      _db.collection('users').doc(friendUid),
+      {'friendIds': FieldValue.arrayUnion([myUid])},
+      SetOptions(merge: true),
+    );
+    await batch.commit();
+  }
+
+  static Future<void> rejectFriendRequest(String requestId) async {
+    await _db.collection('friendRequests').doc(requestId).update({'status': 'rejected'});
+  }
+
+  static Future<void> cancelFriendRequest(String requestId) async {
+    await _db.collection('friendRequests').doc(requestId).delete();
+  }
+
+  // ── Water gifts ───────────────────────────────────────────────────────────
+
+  static String _todayKey() {
+    final now = DateTime.now();
+    return '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+  }
+
+  static Future<bool> hasGiftedToday(String fromUid, String toUid) async {
+    final docId = '${toUid}_${fromUid}_${_todayKey()}';
+    final doc = await _db.collection('waterGifts').doc(docId).get();
+    return doc.exists;
+  }
+
+  static Future<void> sendWaterGift({
+    required String fromUid,
+    required String fromNickname,
+    required String toUid,
+  }) async {
+    final docId = '${toUid}_${fromUid}_${_todayKey()}';
+    await _db.collection('waterGifts').doc(docId).set({
+      'fromUid': fromUid,
+      'fromNickname': fromNickname,
+      'toUid': toUid,
+      'amount': 20,
+      'applied': false,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Future<List<Map<String, dynamic>>> claimWaterGifts(
+      String toUid) async {
+    final snap = await _db
+        .collection('waterGifts')
+        .where('toUid', isEqualTo: toUid)
+        .get();
+    final unapplied =
+        snap.docs.where((d) => d.data()['applied'] == false).toList();
+    if (unapplied.isEmpty) return [];
+
+    final batch = _db.batch();
+    for (final doc in unapplied) {
+      batch.update(doc.reference, {'applied': true});
+    }
+    await batch.commit();
+    return unapplied.map((d) => d.data()).toList();
+  }
+
+  // ── Guestbook ─────────────────────────────────────────────────────────────
+
+  static Future<void> addGuestbookMessage({
+    required String ownerUid,
+    required String fromUid,
+    required String fromNickname,
+    required String message,
+  }) async {
+    await _db
+        .collection('guestbook')
+        .doc(ownerUid)
+        .collection('messages')
+        .add({
+      'fromUid': fromUid,
+      'fromNickname': fromNickname,
+      'message': message,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Future<List<Map<String, dynamic>>> getGuestbookMessages(
+      String ownerUid) async {
+    final snap = await _db
+        .collection('guestbook')
+        .doc(ownerUid)
+        .collection('messages')
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .get();
+    return snap.docs.map((d) {
+      final ts = d.data()['createdAt'];
+      return {
+        'id': d.id,
+        ...d.data(),
+        // Convert Timestamp to int for easy handling
+        if (ts != null)
+          'createdAt': (ts as dynamic).millisecondsSinceEpoch as int,
+      };
+    }).toList();
+  }
+
+  static Future<void> deleteGuestbookMessage(
+      String ownerUid, String msgId) async {
+    await _db
+        .collection('guestbook')
+        .doc(ownerUid)
+        .collection('messages')
+        .doc(msgId)
+        .delete();
+  }
+
   // ── Week key helpers ──────────────────────────────────────────────────────
 
   static int currentWeekKey() => _weekKeyOf(DateTime.now());

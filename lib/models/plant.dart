@@ -15,9 +15,11 @@ enum PlantRarity {
 class Plant {
   final String id;
   final String species;
+  final String? customName;   // user-given nickname
   final HSLColor color;
-  final int growthStage;  // 0 (seed) → 4 (full bloom)
-  final double hydration; // 0.0 – 100.0
+  final int growthStage;      // 0 (seed) → 4 (full bloom)
+  final double hydration;     // 0.0 – 100.0
+  final DateTime? droughtSince; // when hydration first hit 0
   final PlantRarity rarity;
   final DateTime createdAt;
   final List<String> parentIds; // [] for starters, [p1.id, p2.id] for hybrids
@@ -25,13 +27,18 @@ class Plant {
   const Plant({
     required this.id,
     required this.species,
+    this.customName,
     required this.color,
     this.growthStage = 0,
     this.hydration = 50.0,
+    this.droughtSince,
     this.rarity = PlantRarity.common,
     required this.createdAt,
     this.parentIds = const [],
   });
+
+  /// Display name: customName if set, otherwise species.
+  String get displayName => customName?.isNotEmpty == true ? customName! : species;
 
   bool get isHybrid => parentIds.length >= 2;
 
@@ -100,9 +107,13 @@ class Plant {
   Plant copyWith({
     String? id,
     String? species,
+    String? customName,
+    bool clearCustomName = false,
     HSLColor? color,
     int? growthStage,
     double? hydration,
+    DateTime? droughtSince,
+    bool clearDroughtSince = false,
     PlantRarity? rarity,
     DateTime? createdAt,
     List<String>? parentIds,
@@ -110,9 +121,11 @@ class Plant {
     return Plant(
       id: id ?? this.id,
       species: species ?? this.species,
+      customName: clearCustomName ? null : (customName ?? this.customName),
       color: color ?? this.color,
       growthStage: growthStage ?? this.growthStage,
       hydration: hydration ?? this.hydration,
+      droughtSince: clearDroughtSince ? null : (droughtSince ?? this.droughtSince),
       rarity: rarity ?? this.rarity,
       createdAt: createdAt ?? this.createdAt,
       parentIds: parentIds ?? this.parentIds,
@@ -124,11 +137,13 @@ class Plant {
   Map<String, dynamic> toJson() => {
         'id': id,
         'species': species,
+        if (customName != null) 'customName': customName,
         'colorH': color.hue,
         'colorS': color.saturation,
         'colorL': color.lightness,
         'growthStage': growthStage,
         'hydration': hydration,
+        if (droughtSince != null) 'droughtSince': droughtSince!.millisecondsSinceEpoch,
         'rarity': rarity.name,
         'createdAt': createdAt.millisecondsSinceEpoch,
         'parentIds': parentIds,
@@ -137,6 +152,7 @@ class Plant {
   factory Plant.fromJson(Map<String, dynamic> j) => Plant(
         id: j['id'] as String,
         species: j['species'] as String,
+        customName: j['customName'] as String?,
         color: HSLColor.fromAHSL(
           1.0,
           (j['colorH'] as num).toDouble(),
@@ -145,6 +161,9 @@ class Plant {
         ),
         growthStage: (j['growthStage'] as num).toInt(),
         hydration: (j['hydration'] as num).toDouble(),
+        droughtSince: j['droughtSince'] != null
+            ? DateTime.fromMillisecondsSinceEpoch((j['droughtSince'] as num).toInt())
+            : null,
         rarity: PlantRarity.values.firstWhere(
           (r) => r.name == j['rarity'],
           orElse: () => PlantRarity.common,

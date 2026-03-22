@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/notification_service.dart';
 import 'auth/login_screen.dart';
 import 'social/friends_screen.dart';
 
@@ -21,6 +22,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _saving = false;
   bool _available = false;
   String? _feedback;
+
+  // ── 알림 설정 ─────────────────────────────────────────────────────────────
+  bool _notificationsEnabled = NotificationService.isEnabled;
 
   @override
   void dispose() {
@@ -230,6 +234,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const FriendsScreen()),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+          const _SectionLabel('알림'),
+          Container(
+            margin: const EdgeInsets.only(bottom: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A2E1A),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: SwitchListTile(
+              secondary: const Icon(Icons.notifications_rounded,
+                  color: Colors.greenAccent),
+              title: const Text('식물 알림',
+                  style: TextStyle(color: Colors.white)),
+              subtitle: const Text('수분 부족 및 사망 알림',
+                  style: TextStyle(color: Colors.white38, fontSize: 12)),
+              value: _notificationsEnabled,
+              activeColor: Colors.greenAccent,
+              onChanged: (v) async {
+                await NotificationService.setEnabled(v);
+                setState(() => _notificationsEnabled = v);
+              },
             ),
           ),
 

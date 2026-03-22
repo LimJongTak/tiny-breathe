@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 
+import 'services/notification_service.dart';
 import 'views/splash_screen.dart';
 
 // ⚠️  SETUP REQUIRED — see README comments below:
@@ -29,6 +30,9 @@ void main() async {
 
   // Kakao
   KakaoSdk.init(nativeAppKey: 'c66fb7976cdc1b2ed1cd47a545ef2aee');
+
+  // Local notifications
+  await NotificationService.init();
 
   runApp(const ProviderScope(child: PlantGameApp()));
 }

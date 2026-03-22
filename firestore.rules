@@ -3,32 +3,70 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── 유저 프로필 ──────────────────────────────────────────────────────────
-    // 읽기: 로그인한 모든 유저 (친구 검색용)
-    // 쓰기: 본인만
     match /users/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+      // Allow any auth user to modify only friendIds (needed for friend acceptance)
+      allow update: if request.auth != null
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['friendIds', 'updatedAt']);
+    }
+
+    // ── 정원 데이터 ──────────────────────────────────────────────────────────
+    // 읽기: 로그인한 모든 유저 (친구 정원 방문용)
+    // 쓰기: 본인만
+    match /gardens/{uid} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == uid;
     }
 
-    // ── 정원 데이터 ──────────────────────────────────────────────────────────
-    // 읽기/쓰기: 본인만
-    match /gardens/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
-    }
-
     // ── 점수 (리더보드) ──────────────────────────────────────────────────────
-    // 읽기: 로그인한 모든 유저 (랭킹 조회용)
-    // 쓰기: 본인만
     match /scores/{uid} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == uid;
     }
 
     // ── 주간 보상 ────────────────────────────────────────────────────────────
-    // 읽기/쓰기: 본인 문서만 (weekKey_uid 형식)
     match /weeklyRewards/{docId} {
       allow read, write: if request.auth != null
         && docId.matches('^[0-9]+_' + request.auth.uid + '$');
+    }
+
+    // ── 친구 요청 ────────────────────────────────────────────────────────────
+    match /friendRequests/{docId} {
+      allow read: if request.auth != null
+        && (resource.data.fromUid == request.auth.uid
+            || resource.data.toUid == request.auth.uid);
+      allow create: if request.auth != null
+        && request.resource.data.fromUid == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.toUid == request.auth.uid;
+      allow delete: if request.auth != null
+        && (resource.data.fromUid == request.auth.uid
+            || resource.data.toUid == request.auth.uid);
+    }
+
+    // ── 물 선물 ──────────────────────────────────────────────────────────────
+    match /waterGifts/{docId} {
+      allow create: if request.auth != null
+        && request.resource.data.fromUid == request.auth.uid;
+      allow read, update, delete: if request.auth != null
+        && (resource.data.fromUid == request.auth.uid
+            || resource.data.toUid == request.auth.uid);
+    }
+
+    // ── 방명록 ────────────────────────────────────────────────────────────────
+    match /guestbook/{ownerUid}/messages/{msgId} {
+      // 로그인한 모든 유저가 읽기 가능
+      allow read: if request.auth != null;
+      // 본인 방명록에는 다른 사람만 작성 가능
+      allow create: if request.auth != null
+        && request.auth.uid != ownerUid
+        && request.resource.data.fromUid == request.auth.uid;
+      // 정원 주인 또는 작성자만 삭제 가능
+      allow delete: if request.auth != null
+        && (request.auth.uid == ownerUid
+            || resource.data.fromUid == request.auth.uid);
     }
 
     // 그 외 모든 접근 차단

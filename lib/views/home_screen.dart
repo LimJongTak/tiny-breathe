@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../effects/butterfly_painter.dart';
+import '../models/daily_quest.dart';
 import '../models/game_level.dart';
 import '../models/garden_plot.dart';
 import '../models/plant.dart';
@@ -14,9 +15,12 @@ import '../utils/share_helper.dart';
 import '../viewmodels/garden_viewmodel.dart';
 import '../widgets/plant_painter.dart';
 import '../services/connectivity_service.dart';
+import 'achievement_screen.dart';
 import 'auth/login_screen.dart';
 import 'collection_screen.dart';
+import 'daily_quest_screen.dart';
 import 'mini_game_screen.dart';
+import 'onboarding_screen.dart';
 import 'settings_screen.dart';
 import 'shop_screen.dart';
 
@@ -35,6 +39,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   late ButterflyFlock _flock;
   Size _lastSize = const Size(400, 800);
 
+  /// Guards against running the initial cloud load more than once per session.
+  bool _initialLoadDone = false;
+  bool _loadError = false;
+
   @override
   void initState() {
     super.initState();
@@ -43,6 +51,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         AnimationController(vsync: this, duration: const Duration(seconds: 10))
           ..repeat();
     _animCtrl.addListener(_tick);
+
+    // Load cloud data on first mount (covers auto-login: auth state is already
+    // set before HomeScreen is built, so the ref.listen below won't fire).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initialLoad());
+  }
+
+  /// Load garden state from cloud, then run once-per-session checks.
+  Future<void> _initialLoad() async {
+    if (_initialLoadDone) return;
+    final user = ref.read(authProvider);
+    if (user == null) return;
+    _initialLoadDone = true;
+    try {
+      await ref.read(gardenProvider.notifier).loadFromCloud(user.uid);
+      if (!mounted) return;
+      if (_loadError) setState(() => _loadError = false);
+    } catch (_) {
+      if (mounted) setState(() => _loadError = true);
+      return;
+    }
+    if (!mounted) return;
+    await _checkOnboarding();
+    if (!mounted) return;
+    await _checkWaterGifts(user.uid);
+    if (!mounted) return;
+    _checkWeeklyReward(user.uid);
+    _checkDailyReward();
   }
 
   @override
@@ -270,6 +305,111 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  void _checkDailyReward() {
+    final gardenNotifier = ref.read(gardenProvider.notifier);
+    final result = gardenNotifier.claimDailyReward();
+    if (result == null || !mounted) return;
+
+    final coins = result['coins']!;
+    final seeds = result['seeds']!;
+
+    // Persist to cloud
+    final uid = ref.read(authProvider)?.uid;
+    if (uid != null) gardenNotifier.saveToCloud(uid);
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2E1A),
+        title: const Text(
+          '🌅 오늘의 출석 보상!',
+          style: TextStyle(
+              color: Colors.greenAccent,
+              fontSize: 20,
+              fontWeight: FontWeight.bold),
+          textAlign: TextAlign.center,
+        ),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('매일 접속하면 씨앗과 코인을 드려요!',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+              textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          Text('🪙 $coins 코인',
+              style: const TextStyle(
+                  color: Colors.amber,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold)),
+          if (seeds > 0)
+            Text('🌱 씨앗 $seeds개',
+                style: const TextStyle(
+                    color: Colors.greenAccent,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold)),
+        ]),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green[700],
+                foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('받기!'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRenamePlant(String plotId) async {
+    final plot = ref.read(gardenProvider).plots
+        .where((p) => p.id == plotId)
+        .firstOrNull;
+    final plant = plot?.plant;
+    if (plant == null || !mounted) return;
+
+    final ctrl = TextEditingController(text: plant.customName ?? '');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2E1A),
+        title: const Text('식물 이름 짓기',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: ctrl,
+          style: const TextStyle(color: Colors.white),
+          maxLength: 15,
+          decoration: InputDecoration(
+            counterStyle: const TextStyle(color: Colors.white38),
+            hintText: '나만의 이름 (최대 15자)',
+            hintStyle: const TextStyle(color: Colors.white38),
+            filled: true,
+            fillColor: const Color(0xFF0D1B0D),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소', style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green[700],
+                foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (!mounted || result == null) return;
+    ref.read(gardenProvider.notifier).renamePlant(plotId, result);
+  }
+
   Future<void> _checkWeeklyReward(String uid) async {
     try {
       final reward = await FirestoreService.checkAndClaimWeeklyReward(uid);
@@ -320,6 +460,60 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (_) {}
   }
 
+  Future<void> _checkOnboarding() async {
+    final seen = await OnboardingScreen.hasSeenOnboarding();
+    if (!seen && mounted) {
+      // Defer so any dialogs from _initialLoad don't overlap
+      await Future.delayed(const Duration(milliseconds: 400));
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+      );
+    }
+  }
+
+  Future<void> _checkWaterGifts(String uid) async {
+    try {
+      final gifts = await FirestoreService.claimWaterGifts(uid);
+      if (gifts.isEmpty || !mounted) return;
+      for (final gift in gifts) {
+        final from = gift['fromNickname'] as String? ?? '친구';
+        ref.read(gardenProvider.notifier).applyWaterGift(from);
+      }
+      final gardenNotifier = ref.read(gardenProvider.notifier);
+      gardenNotifier.saveToCloud(uid);
+    } catch (_) {}
+  }
+
+  Future<void> _showAdDialog() async {
+    bool done = false;
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _AdDialog(
+        onFinished: () {
+          done = true;
+          Navigator.of(ctx).pop();
+        },
+      ),
+    );
+    if (!done || !mounted) return;
+    ref.read(gardenProvider.notifier).addAdTicket();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('🎫 게임 티켓 +1 획득!')),
+    );
+  }
+
+  void _claimSeasonalSeed() {
+    final seed = SeasonalSeeds.current();
+    ref.read(gardenProvider.notifier).claimSeasonalSeed(seed.name);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${seed.emoji} ${seed.name} 씨앗을 받았어요!')),
+    );
+    final uid = ref.read(authProvider)?.uid;
+    if (uid != null) ref.read(gardenProvider.notifier).saveToCloud(uid);
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
@@ -355,12 +549,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // Activate cloud sync (30-second debounce)
     ref.watch(gardenSyncProvider);
 
-    // Auth state listener – load cloud data on login / navigate on logout
+    // Auth state listener – handle fresh login (fallback) and logout
     ref.listen<AppUser?>(authProvider, (prev, next) async {
       if (next != null && prev == null) {
-        await ref.read(gardenProvider.notifier).loadFromCloud(next.uid);
-        if (!context.mounted) return;
-        _checkWeeklyReward(next.uid);
+        // Fresh login while HomeScreen is already mounted (edge case)
+        await _initialLoad();
       } else if (next == null && prev != null) {
         // 로그아웃 → 로그인 화면으로
         if (context.mounted) {
@@ -409,6 +602,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ),
               ),
             ),
+          // 로드 에러 배너
+          if (_loadError)
+            Material(
+              color: Colors.red[800],
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 6, horizontal: 16),
+                  child: Row(children: [
+                    const Icon(Icons.error_outline_rounded,
+                        color: Colors.white, size: 16),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('정원 로드 실패',
+                          style: TextStyle(
+                              color: Colors.white, fontSize: 12)),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        _initialLoadDone = false;
+                        _initialLoad();
+                      },
+                      child: const Text('재시도',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12)),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
           Expanded(
             child: RepaintBoundary(
         key: _gardenKey,
@@ -438,6 +664,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     coins: state.coins,
                     weatherIcon: weatherIcon,
                     hasEvent: state.eventSeed != null,
+                    pendingQuestRewards: state.dailyQuests
+                        .where((q) => q.completed && !q.claimed)
+                        .length,
                     userInitial: (() {
                       final n = ref.watch(authProvider)?.displayName;
                       return (n != null && n.isNotEmpty) ? n[0] : null;
@@ -450,13 +679,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       MaterialPageRoute(
                           builder: (_) => const CollectionScreen()),
                     ),
-                    onMiniGame: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const MiniGameScreen()),
-                    ),
+                    onMiniGame: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const MiniGameScreen()),
+                      );
+                      if (mounted) {
+                        ref
+                            .read(gardenProvider.notifier)
+                            .progressQuest(QuestType.playMiniGame);
+                      }
+                    },
                     onShop: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const ShopScreen()),
+                    ),
+                    onQuests: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const DailyQuestScreen()),
+                    ),
+                    onAchievements: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const AchievementScreen()),
                     ),
                   ),
 
@@ -470,6 +717,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     occupiedCount: state.occupiedPlots.length,
                     plotCount: state.plots.length,
                   ),
+
+                  // 시즌 이벤트 배너
+                  if (state.canClaimSeasonalSeed)
+                    _SeasonalBanner(
+                      seed: SeasonalSeeds.current(),
+                      onClaim: _claimSeasonalSeed,
+                    ),
+
+                  // 게임 티켓 광고 충전 버튼 (티켓 < 5일 때만)
+                  if (state.gameTickets < GardenState.maxGameTickets)
+                    _AdTicketBanner(
+                      tickets: state.gameTickets,
+                      onWatchAd: _showAdDialog,
+                    ),
 
                   // Fence
                   const _Fence(),
@@ -516,6 +777,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     onRemove:  (id) => ref.read(gardenProvider.notifier).removePlant(id),
                     onShare:   _sharePlant,
                     onPlant:   _showSeedPicker,
+                    onRename:  _showRenamePlant,
                   ),
                 ],
               ),
@@ -619,9 +881,10 @@ class _TopBar extends StatelessWidget {
   final int level, collectionCount, seedCount, coins;
   final IconData weatherIcon;
   final bool hasEvent;
+  final int pendingQuestRewards;
   final String? userInitial;
   final VoidCallback onWeather, onCollection, onShareGarden, onMiniGame,
-      onShop, onProfile;
+      onShop, onProfile, onQuests, onAchievements;
 
   const _TopBar({
     required this.level,
@@ -630,6 +893,7 @@ class _TopBar extends StatelessWidget {
     required this.coins,
     required this.weatherIcon,
     required this.hasEvent,
+    required this.pendingQuestRewards,
     required this.userInitial,
     required this.onWeather,
     required this.onCollection,
@@ -637,6 +901,8 @@ class _TopBar extends StatelessWidget {
     required this.onMiniGame,
     required this.onShop,
     required this.onProfile,
+    required this.onQuests,
+    required this.onAchievements,
   });
 
   @override
@@ -654,6 +920,21 @@ class _TopBar extends StatelessWidget {
           const Spacer(),
           // Coins (tapping goes to shop)
           _CoinChip(coins: coins, onTap: onShop),
+          const SizedBox(width: 6),
+          // Daily quests
+          _IconBtn(
+            icon: Icons.checklist_rounded,
+            badge: pendingQuestRewards > 0
+                ? '$pendingQuestRewards'
+                : null,
+            onTap: onQuests,
+          ),
+          const SizedBox(width: 6),
+          // Achievements
+          _IconBtn(
+            icon: Icons.emoji_events_rounded,
+            onTap: onAchievements,
+          ),
           const SizedBox(width: 6),
           // Mini-game
           _IconBtn(
@@ -933,12 +1214,24 @@ class _PlotCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(15),
           child: Column(
             children: [
-              if (plant != null && plant.growthStage == 4)
+              if (plant != null && plant.droughtSince != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  color: Colors.red.withValues(alpha: 0.80),
+                  child: const Text('🥀 시들고 있어요!',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold)),
+                )
+              else if (plant != null && plant.growthStage == 4)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   color: Colors.amber.withValues(alpha: 0.85),
-                  child: const Text('\u2728 \uc218\ud655 \uac00\ub2a5',
+                  child: const Text('✨ 수확 가능',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                           color: Colors.black87,
@@ -1022,7 +1315,7 @@ class _PlotFooter extends StatelessWidget {
         children: [
           Row(children: [
             Expanded(
-              child: Text(plant.species,
+              child: Text(plant.displayName,
                   style: const TextStyle(
                       color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                   maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -1085,6 +1378,7 @@ class _BottomPanel extends StatelessWidget {
   final void Function(String) onRemove;
   final Future<void> Function(GardenPlot) onShare;
   final void Function(String) onPlant;
+  final void Function(String) onRename;
 
   const _BottomPanel({
     required this.selectedPlot,
@@ -1094,6 +1388,7 @@ class _BottomPanel extends StatelessWidget {
     required this.onRemove,
     required this.onShare,
     required this.onPlant,
+    required this.onRename,
   });
 
   static const _stageNames = ['\uc528\uc557', '\uc0c8\uc2f9', '\ubaa8\uc885', '\uccad\ub144', '\ub9cc\uac1c \uD83C\uDF38'];
@@ -1149,6 +1444,7 @@ class _BottomPanel extends StatelessWidget {
                       onHarvest: plant.growthStage == 4 ? () => onHarvest(plot.id) : null,
                       onRemove: plant.growthStage < 4 ? () => onRemove(plot.id) : null,
                       onShare: () => onShare(plot),
+                      onRename: () => onRename(plot.id),
                     )
                   : _EmptyPanel(onPlant: () => onPlant(plot.id)),
             ),
@@ -1195,6 +1491,7 @@ class _OccupiedPanel extends StatelessWidget {
   final VoidCallback? onHarvest;
   final VoidCallback? onRemove;
   final VoidCallback onShare;
+  final VoidCallback onRename;
 
   const _OccupiedPanel({
     required this.plot,
@@ -1207,6 +1504,7 @@ class _OccupiedPanel extends StatelessWidget {
     required this.onHarvest,
     required this.onRemove,
     required this.onShare,
+    required this.onRename,
   });
 
   @override
@@ -1225,23 +1523,51 @@ class _OccupiedPanel extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(children: [
-                  Text(plant.species,
+                  Flexible(
+                    child: Text(
+                      plant.displayName,
                       style: const TextStyle(
                           color: Colors.white,
                           fontSize: 18,
-                          fontWeight: FontWeight.bold)),
+                          fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   if (plant.isHybrid) ...[
                     const SizedBox(width: 6),
-                    const Text('\uD83E\uDDEC',
-                        style: TextStyle(fontSize: 14)),
+                    const Text('🧬', style: TextStyle(fontSize: 14)),
                   ],
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    onTap: onRename,
+                    child: const Icon(Icons.edit_rounded,
+                        color: Colors.white38, size: 14),
+                  ),
                 ]),
-                Text('${stageNames[plant.growthStage]}  \u2022  \ud654\ub2e8 ${plot.index + 1}\ubc88',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                if (plant.customName != null && plant.customName!.isNotEmpty)
+                  Text(
+                    plant.species,
+                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+                Text(
+                  '${stageNames[plant.growthStage]}  •  화단 ${plot.index + 1}번',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
               ],
             ),
           ),
-          if (canHarvest)
+          if (plant.droughtSince != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red),
+              ),
+              child: const Text('🥀 시들어요!',
+                  style: TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold)),
+            )
+          else if (canHarvest)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
@@ -1249,7 +1575,7 @@ class _OccupiedPanel extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.amber),
               ),
-              child: const Text('\uc218\ud655 \uac00\ub2a5',
+              child: const Text('수확 가능',
                   style: TextStyle(color: Colors.amber, fontSize: 11)),
             )
           else
@@ -1516,6 +1842,180 @@ class _InventoryGrid extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Seasonal event banner
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SeasonalBanner extends StatelessWidget {
+  final SeedInfo seed;
+  final VoidCallback onClaim;
+
+  const _SeasonalBanner({required this.seed, required this.onClaim});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 2),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            seed.hslColor.toColor().withValues(alpha: 0.35),
+            seed.hslColor.toColor().withValues(alpha: 0.15),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: seed.hslColor.toColor().withValues(alpha: 0.6)),
+      ),
+      child: Row(children: [
+        Text(seed.emoji, style: const TextStyle(fontSize: 22)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${SeasonalSeeds.seasonLabel()} 시즌 이벤트!',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold)),
+              Text('${seed.name} 씨앗을 무료로 받아보세요',
+                  style: const TextStyle(
+                      color: Colors.white60, fontSize: 10)),
+            ],
+          ),
+        ),
+        ElevatedButton(
+          onPressed: onClaim,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: seed.hslColor.toColor(),
+            foregroundColor: Colors.white,
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+          child: const Text('받기', style: TextStyle(fontSize: 12)),
+        ),
+      ]),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ad ticket banner
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AdTicketBanner extends StatelessWidget {
+  final int tickets;
+  final VoidCallback onWatchAd;
+
+  const _AdTicketBanner({required this.tickets, required this.onWatchAd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 2, 12, 2),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.indigo.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.indigoAccent.withValues(alpha: 0.5)),
+      ),
+      child: Row(children: [
+        const Text('🎫', style: TextStyle(fontSize: 20)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            '게임 티켓 $tickets/${GardenState.maxGameTickets} — 광고를 보고 티켓을 충전하세요',
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: onWatchAd,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.indigo[600],
+            foregroundColor: Colors.white,
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+          child: const Text('광고 보기', style: TextStyle(fontSize: 11)),
+        ),
+      ]),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ad dialog (simulated 5-second countdown)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AdDialog extends StatefulWidget {
+  final VoidCallback onFinished;
+  const _AdDialog({required this.onFinished});
+
+  @override
+  State<_AdDialog> createState() => _AdDialogState();
+}
+
+class _AdDialogState extends State<_AdDialog> {
+  int _remaining = 5;
+  late final _timer = Stream.periodic(
+    const Duration(seconds: 1),
+    (i) => 4 - i,
+  ).take(5);
+
+  @override
+  void initState() {
+    super.initState();
+    _timer.listen((v) {
+      if (!mounted) return;
+      setState(() => _remaining = v);
+      if (v == 0) {
+        Future.microtask(widget.onFinished);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A1A2E),
+      title: const Text('광고 시청 중...',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          textAlign: TextAlign.center),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('🎬', style: TextStyle(fontSize: 52)),
+        const SizedBox(height: 16),
+        const Text('잠시 후 티켓이 지급됩니다',
+            style: TextStyle(color: Colors.white60, fontSize: 13),
+            textAlign: TextAlign.center),
+        const SizedBox(height: 16),
+        Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.indigoAccent, width: 3),
+          ),
+          child: Center(
+            child: Text(
+              '$_remaining',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+      ]),
     );
   }
 }

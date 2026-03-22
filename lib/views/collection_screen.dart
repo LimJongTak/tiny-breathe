@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../models/game_level.dart';
 import '../models/plant.dart';
 import '../models/shop_item.dart';
 import '../utils/plant_code.dart';
@@ -174,6 +175,10 @@ class _CollectionScreenState extends ConsumerState<CollectionScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(gardenProvider);
     final plants = _sorted(state.collection);
+    final collectedSpecies =
+        state.collection.map((p) => p.species).toSet().length;
+    final totalSpecies = GameLevels.seeds.length;
+    final completionPct = (collectedSpecies / totalSpecies * 100).round();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1B0D),
@@ -191,10 +196,25 @@ class _CollectionScreenState extends ConsumerState<CollectionScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('\uc2dd\ubb3c \ub3c4\uac10',
+            const Text('식물 도감',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            Text('${plants.length}\uc885 \uc218\uc9d1',
-                style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            Row(children: [
+              Text('$collectedSpecies / $totalSpecies종  ($completionPct%)',
+                  style: const TextStyle(color: Colors.white54, fontSize: 11)),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 60,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: collectedSpecies / totalSpecies,
+                    minHeight: 5,
+                    backgroundColor: Colors.white12,
+                    color: Colors.greenAccent,
+                  ),
+                ),
+              ),
+            ]),
           ],
         ),
         actions: [

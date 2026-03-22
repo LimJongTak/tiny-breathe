@@ -5,6 +5,17 @@ import '../models/game_score.dart';
 abstract final class FirestoreService {
   static final _db = FirebaseFirestore.instance;
 
+  // ── Account deletion ──────────────────────────────────────────────────────
+
+  /// 유저 관련 모든 Firestore 데이터 삭제
+  static Future<void> deleteUserData(String uid) async {
+    final batch = _db.batch();
+    batch.delete(_db.collection('users').doc(uid));
+    batch.delete(_db.collection('gardens').doc(uid));
+    batch.delete(_db.collection('scores').doc(uid));
+    await batch.commit();
+  }
+
   // ── Garden ────────────────────────────────────────────────────────────────
 
   static Future<void> saveGarden(String uid, Map<String, dynamic> data) async {

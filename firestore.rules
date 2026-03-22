@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── 유저 프로필 ──────────────────────────────────────────────────────────
+    // 읽기: 로그인한 모든 유저 (친구 검색용)
+    // 쓰기: 본인만
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ── 정원 데이터 ──────────────────────────────────────────────────────────
+    // 읽기/쓰기: 본인만
+    match /gardens/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ── 점수 (리더보드) ──────────────────────────────────────────────────────
+    // 읽기: 로그인한 모든 유저 (랭킹 조회용)
+    // 쓰기: 본인만
+    match /scores/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ── 주간 보상 ────────────────────────────────────────────────────────────
+    // 읽기/쓰기: 본인 문서만 (weekKey_uid 형식)
+    match /weeklyRewards/{docId} {
+      allow read, write: if request.auth != null
+        && docId.matches('^[0-9]+_' + request.auth.uid + '$');
+    }
+
+    // 그 외 모든 접근 차단
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

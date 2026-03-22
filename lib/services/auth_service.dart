@@ -171,6 +171,7 @@ class AuthNotifier extends StateNotifier<AppUser?> {
 
   Future<void> signOut() async {
     final user = state;
+    state = null;
     if (user?.provider == 'google') {
       await FirebaseAuth.instance.signOut();
       await GoogleSignIn().signOut();
@@ -181,7 +182,37 @@ class AuthNotifier extends StateNotifier<AppUser?> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kUserKey);
     }
+  }
+
+  /// 회원탈퇴: 모든 데이터 삭제 후 계정 제거
+  Future<void> deleteAccount() async {
+    final user = state;
+    if (user == null) return;
     state = null;
+
+    // Firestore 데이터 삭제
+    try {
+      await FirestoreService.deleteUserData(user.uid);
+    } catch (e) {
+      debugPrint('[Auth] deleteUserData failed: $e');
+    }
+
+    if (user.provider == 'google') {
+      try {
+        final fbUser = FirebaseAuth.instance.currentUser;
+        await fbUser?.delete();
+      } catch (e) {
+        debugPrint('[Auth] Firebase user delete failed: $e');
+      }
+      await FirebaseAuth.instance.signOut();
+      await GoogleSignIn().signOut();
+    } else if (user.provider == 'kakao') {
+      try {
+        await UserApi.instance.unlink(); // 카카오 연결 해제
+      } catch (_) {}
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kUserKey);
+    }
   }
 }
 

@@ -13,11 +13,12 @@ import '../services/weather_service.dart';
 import '../utils/share_helper.dart';
 import '../viewmodels/garden_viewmodel.dart';
 import '../widgets/plant_painter.dart';
+import '../services/connectivity_service.dart';
 import 'auth/login_screen.dart';
 import 'collection_screen.dart';
 import 'mini_game_screen.dart';
+import 'settings_screen.dart';
 import 'shop_screen.dart';
-import 'social/friends_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -263,60 +264,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           MaterialPageRoute(builder: (_) => const LoginScreen()));
       return;
     }
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1A2E1A),
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          CircleAvatar(
-            radius: 36,
-            backgroundColor: Colors.green[800],
-            backgroundImage: user.photoUrl != null
-                ? NetworkImage(user.photoUrl!)
-                : null,
-            child: user.photoUrl == null
-                ? Text(user.displayName[0],
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold))
-                : null,
-          ),
-          const SizedBox(height: 12),
-          Text(user.displayName,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold)),
-          Text(user.provider == 'kakao' ? '카카오 계정' : 'Google 계정',
-              style: const TextStyle(color: Colors.white54, fontSize: 12)),
-          const SizedBox(height: 20),
-          ListTile(
-            leading:
-                const Icon(Icons.people_rounded, color: Colors.greenAccent),
-            title: const Text('친구 / 랭킹',
-                style: TextStyle(color: Colors.white)),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const FriendsScreen()));
-            },
-          ),
-          ListTile(
-            leading:
-                const Icon(Icons.logout_rounded, color: Colors.redAccent),
-            title: const Text('로그아웃',
-                style: TextStyle(color: Colors.redAccent)),
-            onTap: () async {
-              Navigator.pop(context);
-              await ref.read(authProvider.notifier).signOut();
-            },
-          ),
-        ]),
-      ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
   }
 
@@ -405,12 +355,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // Activate cloud sync (30-second debounce)
     ref.watch(gardenSyncProvider);
 
-    // Auth state listener – load cloud data on login, check weekly rewards
+    // Auth state listener – load cloud data on login / navigate on logout
     ref.listen<AppUser?>(authProvider, (prev, next) async {
       if (next != null && prev == null) {
         await ref.read(gardenProvider.notifier).loadFromCloud(next.uid);
         if (!context.mounted) return;
         _checkWeeklyReward(next.uid);
+      } else if (next == null && prev != null) {
+        // 로그아웃 → 로그인 화면으로
+        if (context.mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const LoginScreen()),
+            (_) => false,
+          );
+        }
       }
     });
 
@@ -423,9 +381,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       WeatherGameState.night  => Icons.nights_stay_rounded,
     };
 
+    final isOnline = ref.watch(connectivityProvider).valueOrNull ?? true;
+
     return Scaffold(
       backgroundColor: Colors.black,
-      body: RepaintBoundary(
+      body: Column(
+        children: [
+          // 오프라인 배너
+          if (!isOnline)
+            Material(
+              color: Colors.orange[800],
+              child: const SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.wifi_off_rounded,
+                          color: Colors.white, size: 16),
+                      SizedBox(width: 8),
+                      Text(
+                        '오프라인 상태 — 저장된 데이터로 플레이 중',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          Expanded(
+            child: RepaintBoundary(
         key: _gardenKey,
         child: Stack(
           children: [
@@ -537,7 +522,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
           ],
         ),
-      ),
+          ),  // RepaintBoundary
+          ),  // Expanded
+        ],    // outer Column children
+      ),      // outer Column (body)
     );
   }
 }

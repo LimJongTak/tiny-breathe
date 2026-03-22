@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>972878125092-3lv3dngdbe3o3ilfjd2t6gpjrii0rp95.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.972878125092-3lv3dngdbe3o3ilfjd2t6gpjrii0rp95</string>
+	<key>API_KEY</key>
+	<string>AIzaSyBcCZRGLyZTnQHqje7mHW8fb6gyooWe4Zk</string>
+	<key>GCM_SENDER_ID</key>
+	<string>972878125092</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>CFBundleIdentifier</string>
+	<key>PROJECT_ID</key>
+	<string>tiny-breathe</string>
+	<key>STORAGE_BUCKET</key>
+	<string>tiny-breathe.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:972878125092:ios:d7a1ad42e9226fafcf60b1</string>
+</dict>
+</plist>

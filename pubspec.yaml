@@ -1,0 +1,35 @@
+name: tiny_breathe
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  geolocator: ^14.0.2
+  http: ^1.6.0
+  path_provider: ^2.1.5
+  provider: ^6.1.5+1
+  flutter_riverpod: ^2.6.1
+  intl: ^0.20.2
+  rive: ^0.14.4
+  share_plus: ^12.0.1
+  # Auth & Cloud
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  firebase_analytics: ^11.3.4
+  cloud_firestore: ^5.4.4
+  google_sign_in: ^6.2.1
+  kakao_flutter_sdk_user: ^1.9.7
+  shared_preferences: ^2.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
